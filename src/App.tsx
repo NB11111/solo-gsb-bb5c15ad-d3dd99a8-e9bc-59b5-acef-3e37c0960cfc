@@ -22,6 +22,7 @@ import {
   Revision,
   RevisionSync,
 } from './lib/revisionStore';
+import { exportPlanBackup, importPlanBackup } from './lib/cryptoBackup';
 import Toolbar from './components/Toolbar';
 import RootsPanel from './components/RootsPanel';
 import TreeView from './components/TreeView';
@@ -30,6 +31,7 @@ import NewAllocationForm from './components/NewAllocationForm';
 import MigrationModal from './components/MigrationModal';
 import PrefixPolicyModal from './components/PrefixPolicyModal';
 import ConflictModal from './components/ConflictModal';
+import CryptoBackupModal from './components/CryptoBackupModal';
 
 interface MigrationRequest {
   title: string;
@@ -72,6 +74,8 @@ export default function App() {
   const [migration, setMigration] = useState<MigrationRequest | null>(null);
   const [resizeTarget, setResizeTarget] = useState<Allocation | null>(null);
   const [prefixPolicyOpen, setPrefixPolicyOpen] = useState(false);
+  const [backupExportOpen, setBackupExportOpen] = useState(false);
+  const [backupImport, setBackupImport] = useState<{ name: string; text: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ local: Revision; remote: Revision } | null>(null);
   const [ready, setReady] = useState(false);
@@ -410,6 +414,46 @@ export default function App() {
     [commit, showToast],
   );
 
+  // ---- 加密备份 ----
+  /** 加密导出：成功后下载信封文件；口令只经由此调用传入，绝不落盘。 */
+  const submitExportBackup = useCallback(
+    async (password: string): Promise<string | null> => {
+      try {
+        const envelope = await exportPlanBackup(planRef.current, password);
+        const blob = new Blob([envelope], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `subnet-plan-backup-${new Date().toISOString().slice(0, 10)}.enc.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setBackupExportOpen(false);
+        showToast('加密备份已导出（口令未保存，请妥善保管）');
+        return null;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    },
+    [showToast],
+  );
+
+  /** 加密导入：解密并通过 Plan 完整校验后才作为一次可撤销修订提交；任何失败都保持当前规划不变。 */
+  const submitImportBackup = useCallback(
+    async (password: string): Promise<string | null> => {
+      if (!backupImport) return '没有待导入的备份文件';
+      try {
+        const imported = await importPlanBackup(backupImport.text, password);
+        commit(imported);
+        setBackupImport(null);
+        showToast('加密备份导入成功');
+        return null;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    },
+    [backupImport, commit, showToast],
+  );
+
   const loadDemo = useCallback(() => commit(demoPlan()), [commit]);
   const resetPlan = useCallback(() => commit(emptyPlan()), [commit]);
 
@@ -425,6 +469,8 @@ export default function App() {
         onRedo={redo}
         onExport={exportPlan}
         onImport={importPlan}
+        onExportBackup={() => setBackupExportOpen(true)}
+        onImportBackup={(name, text) => setBackupImport({ name, text })}
         onLoadDemo={loadDemo}
         onReset={resetPlan}
         onPrefixPolicy={() => setPrefixPolicyOpen(true)}
@@ -507,6 +553,23 @@ export default function App() {
         <PrefixPolicyModal
           allocations={plan.allocations}
           onClose={() => setPrefixPolicyOpen(false)}
+        />
+      )}
+
+      {backupExportOpen && (
+        <CryptoBackupModal
+          mode="export"
+          onSubmit={submitExportBackup}
+          onClose={() => setBackupExportOpen(false)}
+        />
+      )}
+
+      {backupImport && (
+        <CryptoBackupModal
+          mode="import"
+          fileName={backupImport.name}
+          onSubmit={submitImportBackup}
+          onClose={() => setBackupImport(null)}
         />
       )}
 

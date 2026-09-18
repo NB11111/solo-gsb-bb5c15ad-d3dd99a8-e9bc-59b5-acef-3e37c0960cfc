@@ -1,8 +1,8 @@
 # IPv4 子网规划台
 
-一个纯本地的 IPv4 子网规划工具：在互不重叠的根网段中，以树形地址空间可视化管理命名保留段与子网分配，支持按主机数自动申请最小可用子网、迁移预演、撤销重做与规划 JSON 导入导出。
+一个纯本地的 IPv4 子网规划工具：在互不重叠的根网段中，以树形地址空间可视化管理命名保留段与子网分配，支持按主机数自动申请最小可用子网、迁移预演、撤销重做、规划 JSON 导入导出与口令加密的备份导出/导入。
 
-技术栈：**React 18 + TypeScript + Vite + ipaddr.js**，无任何后端依赖；规划以**修订图（revision graph）持久化在浏览器 localStorage**，并通过 **BroadcastChannel 在本机多个标签页之间协同编辑**。
+技术栈：**React 18 + TypeScript + Vite + ipaddr.js**，无任何后端依赖；规划以**修订图（revision graph）持久化在浏览器 localStorage**，并通过 **BroadcastChannel 在本机多个标签页之间协同编辑**；加密备份基于 **Web Crypto API**（PBKDF2-SHA-256 + AES-GCM-256）在浏览器内完成。
 
 ## 快速启动
 
@@ -26,7 +26,7 @@ npm run dev
 ### 其他命令
 
 ```bash
-npm test            # 运行规划引擎与协同同步单元测试（vitest，107 项）
+npm test            # 运行规划引擎与协同同步单元测试（vitest，124 项）
 npm run build       # 类型检查 + 生产构建（输出 dist/）
 npm run preview     # 预览生产构建（http://localhost:4173）
 ```
@@ -123,6 +123,22 @@ npm run preview     # 预览生产构建（http://localhost:4173）
 - **导入**：选择 JSON 文件，完整校验（格式、对齐、根网段重叠、分配越界/重叠、容量一致性）通过后才替换当前规划，失败会列出全部错误；
 - 「载入示例」可一键填充演示数据。
 
+### 加密备份
+- 工具栏「**加密导出**」：弹窗内**输入并确认口令**，使用 Web Crypto 生成**随机 16 字节 salt 与 12 字节 iv**，以 **PBKDF2-SHA-256 迭代 200000 次**派生 **AES-GCM-256** 密钥加密当前规划，下载**版本化 JSON 信封**：
+
+  ```json
+  {
+    "format": "ipv4-subnet-planner/encrypted-backup",
+    "version": 1,
+    "kdf": { "name": "PBKDF2", "hash": "SHA-256", "iterations": 200000, "salt": "<Base64，16 字节>" },
+    "cipher": { "name": "AES-GCM", "iv": "<Base64，12 字节>" },
+    "ciphertext": "<Base64，含 GCM 认证标签>"
+  }
+  ```
+
+- 工具栏「**加密导入**」：选择信封文件后输入口令解密。**仅接受上述信封**——字段缺失或 Base64 非法、版本不支持、口令错误、密文被篡改（GCM 认证失败）一律**拒绝并保持当前规划不变**；解密内容仍须通过现有 Plan 完整校验，成功后作为**一次可撤销修订**替换当前规划；
+- 口令与派生密钥只存在于单次加解密调用中，**绝不写入 localStorage 等任何持久化存储**；口令遗忘后备份内容无法恢复。
+
 ## 项目结构
 
 ```
@@ -139,13 +155,15 @@ npm run preview     # 预览生产构建（http://localhost:4173）
 │   │   ├── model.ts        # 数据模型、校验、JSON 导入导出
 │   │   ├── planner.ts      # 最低可用地址分配、迁移预演、地址空间树
 │   │   ├── revisionStore.ts # 修订图：localStorage 持久化、BroadcastChannel 同步、分叉/合并判定
+│   │   ├── cryptoBackup.ts  # 加密备份信封：PBKDF2-SHA-256 派生 AES-GCM-256，Base64 版本化信封
 │   │   ├── ip.test.ts      # 引擎单元测试
 │   │   ├── dhcp.test.ts
 │   │   ├── reverseDns.test.ts
 │   │   ├── prefixPolicy.test.ts
 │   │   ├── planner.test.ts
-│   │   └── revisionStore.test.ts
-│   ├── components/         # 工具栏、根网段、树视图、分配清单、迁移预演/DHCP 池/反向 DNS/前缀策略弹窗等
+│   │   ├── revisionStore.test.ts
+│   │   └── cryptoBackup.test.ts
+│   ├── components/         # 工具栏、根网段、树视图、分配清单、迁移预演/DHCP 池/反向 DNS/前缀策略/加密备份弹窗等
 │   ├── App.tsx             # 状态与历史栈（撤销/重做）、迁移流程编排
 │   └── main.tsx
 └── package.json

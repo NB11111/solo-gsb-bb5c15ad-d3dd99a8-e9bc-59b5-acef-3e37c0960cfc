@@ -9,6 +9,8 @@ interface Props {
   onRedo: () => void;
   onExport: () => void;
   onImport: (text: string) => void;
+  onExportBackup: () => void;
+  onImportBackup: (fileName: string, text: string) => void;
   onLoadDemo: () => void;
   onReset: () => void;
   onPrefixPolicy: () => void;
@@ -16,6 +18,7 @@ interface Props {
 
 export default function Toolbar(props: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const backupFileRef = useRef<HTMLInputElement>(null);
   const locked = props.locked ?? false;
 
   const handleFile = async (file: File | undefined) => {
@@ -23,6 +26,13 @@ export default function Toolbar(props: Props) {
     const text = await file.text();
     props.onImport(text);
     if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const handleBackupFile = async (file: File | undefined) => {
+    if (!file) return;
+    const text = await file.text();
+    props.onImportBackup(file.name, text);
+    if (backupFileRef.current) backupFileRef.current.value = '';
   };
 
   return (
@@ -55,6 +65,19 @@ export default function Toolbar(props: Props) {
           accept="application/json,.json"
           hidden
           onChange={(e) => void handleFile(e.target.files?.[0])}
+        />
+        <button className="btn" onClick={props.onExportBackup} title="用口令加密导出当前规划（PBKDF2-SHA-256 + AES-GCM-256）">
+          加密导出
+        </button>
+        <button className="btn" onClick={() => backupFileRef.current?.click()} disabled={locked} title={locked ? '冲突解决前不可导入' : '选择加密备份文件并输入口令解密导入'}>
+          加密导入
+        </button>
+        <input
+          ref={backupFileRef}
+          type="file"
+          accept="application/json,.json"
+          hidden
+          onChange={(e) => void handleBackupFile(e.target.files?.[0])}
         />
         <span className="divider" />
         <button className="btn" onClick={props.onLoadDemo} disabled={locked}>

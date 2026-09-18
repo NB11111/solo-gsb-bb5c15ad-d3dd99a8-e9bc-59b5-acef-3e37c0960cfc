@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "本地 IPv4 子网规划台：树形地址空间、命名保留段、按主机数申请、迁移预演、撤销重做、JSON 导入导出",
+  "description": "本地 IPv4 子网规划台：树形地址空间、命名保留段、按主机数申请、迁移预演、撤销重做、JSON 导入导出与口令加密备份",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
