@@ -30,6 +30,8 @@ import NewAllocationForm from './components/NewAllocationForm';
 import MigrationModal from './components/MigrationModal';
 import PrefixPolicyModal from './components/PrefixPolicyModal';
 import ConflictModal from './components/ConflictModal';
+import EncryptedBackupModal from './components/EncryptedBackupModal';
+import { decryptPlan, encryptPlan, serializeEnvelope } from './lib/cryptoBackup';
 
 interface MigrationRequest {
   title: string;
@@ -75,6 +77,11 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ local: Revision; remote: Revision } | null>(null);
   const [ready, setReady] = useState(false);
+  // 加密备份弹窗：export 只需模式；import 暂存所选文件文本（仅内存，随弹窗关闭清除）。
+  // 口令只存在弹窗组件局部状态中，App 不落任何形式的口令/派生密钥。
+  const [backupModal, setBackupModal] = useState<
+    { mode: 'export' } | { mode: 'import'; fileText: string } | null
+  >(null);
 
   const syncRef = useRef<RevisionSync | null>(null);
   const planRef = useRef<Plan>(plan);
@@ -387,15 +394,20 @@ export default function App() {
   );
 
   // ---- 导入导出 ----
-  const exportPlan = useCallback(() => {
-    const blob = new Blob([serializePlan(planRef.current)], { type: 'application/json' });
+  /** 下载一个 JSON Blob（明文规划与加密信封共用）。 */
+  const downloadJson = useCallback((content: string, basename: string) => {
+    const blob = new Blob([content], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `subnet-plan-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `${basename}-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }, []);
+
+  const exportPlan = useCallback(() => {
+    downloadJson(serializePlan(planRef.current), 'subnet-plan');
+  }, [downloadJson]);
 
   const importPlan = useCallback(
     (text: string) => {
@@ -405,6 +417,45 @@ export default function App() {
         showToast('规划导入成功');
       } catch (e) {
         showToast((e as Error).message);
+      }
+    },
+    [commit, showToast],
+  );
+
+  // ---- 加密备份导入 / 导出（Web Crypto：PBKDF2-SHA-256 + AES-GCM-256）----
+  /**
+   * 加密导出：随机 salt/iv、PBKDF2 200000 次派生 AES-GCM 密钥，下载版本化信封。
+   * 成功后关闭弹窗；任何异常返回错误信息列表，当前规划不受影响。
+   */
+  const encryptedExport = useCallback(
+    async (password: string): Promise<string[]> => {
+      try {
+        const backup = await encryptPlan(planRef.current, password);
+        downloadJson(serializeEnvelope(backup), 'subnet-plan-encrypted');
+        setBackupModal(null);
+        showToast('加密备份已生成并下载（口令未被保存）');
+        return [];
+      } catch (e) {
+        return [(e as Error).message];
+      }
+    },
+    [downloadJson, showToast],
+  );
+
+  /**
+   * 加密导入：仅在信封合法、解密通过且明文通过现有 Plan 完整校验后才 commit，
+   * 作为一次可撤销修订替换当前规划；任何环节失败都返回错误且 Plan 原样不变。
+   */
+  const encryptedImport = useCallback(
+    async (fileText: string, password: string): Promise<string[]> => {
+      try {
+        const imported = await decryptPlan(fileText, password);
+        commit(imported);
+        setBackupModal(null);
+        showToast('加密备份解密并导入成功');
+        return [];
+      } catch (e) {
+        return [(e as Error).message];
       }
     },
     [commit, showToast],
@@ -425,6 +476,8 @@ export default function App() {
         onRedo={redo}
         onExport={exportPlan}
         onImport={importPlan}
+        onEncryptedExport={() => setBackupModal({ mode: 'export' })}
+        onEncryptedImport={(text) => setBackupModal({ mode: 'import', fileText: text })}
         onLoadDemo={loadDemo}
         onReset={resetPlan}
         onPrefixPolicy={() => setPrefixPolicyOpen(true)}
